@@ -1,17 +1,16 @@
-# работа с 2GIS API
 # routers/places.py
 from fastapi import APIRouter
 import requests
 import os
 import pandas as pd
 import json
+import math
 from dotenv import load_dotenv
 
 load_dotenv()
 router = APIRouter(prefix="/api/places", tags=["Places"])
 
-# API-ключ 2GIS
-API_KEY = "401b0774-dbe8-4f70-91c9-697adac3e650"
+API_KEY = os.getenv("DGIS_API_KEY", "401b0774-dbe8-4f70-91c9-697adac3e650")
 
 DATA_DIR = "data/raw"
 META_DIR = "data/meta"
@@ -20,67 +19,94 @@ FILE_PATH = os.path.join(DATA_DIR, "places.csv")
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(META_DIR, exist_ok=True)
 
-# --- 🔧 Вспомогательные функции ---
-def safe_float(value):
-    """Безопасное преобразование в float"""
+
+# --- Utility functions ---
+def safe_float(v):
     try:
-        v = float(value)
-        if v == float("inf") or v == float("-inf"):
+        v = float(v)
+        if math.isnan(v) or math.isinf(v):
             return None
-        return v
-    except Exception:
+        return round(v, 6)
+    except:
         return None
 
-def extract_contacts(contact_groups):
-    """Извлекает телефоны"""
-    if not contact_groups:
+
+def extract_contacts(groups):
+    if not groups:
         return ""
     phones = []
-    for group in contact_groups:
-        for contact in group.get("contacts", []):
-            if contact.get("type") == "phone":
-                phones.append(contact.get("value"))
+    for g in groups:
+        for c in g.get("contacts", []):
+            if c.get("type") == "phone":
+                phones.append(c.get("value"))
     return ", ".join(phones)
 
+
 def extract_coords(point):
-    """Извлекает координаты"""
     if not point:
         return "", None, None
-    lat = safe_float(point.get("lat"))
-    lon = safe_float(point.get("lon"))
+    lat, lon = safe_float(point.get("lat")), safe_float(point.get("lon"))
     coords = f"{lat}, {lon}" if lat and lon else ""
     return coords, lat, lon
 
+
 def extract_schedule(item):
-    """Форматирует расписание в JSON"""
-    schedule = item.get("schedule")
-    if not schedule:
+    s = item.get("schedule")
+    if not s:
         return ""
     try:
-        return json.dumps(schedule, ensure_ascii=False)
-    except Exception:
-        return str(schedule)
+        return json.dumps(s, ensure_ascii=False)
+    except:
+        return str(s)
 
-# --- 🚀 Основной эндпоинт ---
-@router.get("/")
-def get_places(query: str = "глэмпинг", city: str = "Алматы", region_id: int = 12):
-    """
-    Получает данные из 2GIS и сохраняет их в data/raw/places.csv.
-    Также записывает последний запрос (query, city) в data/meta/.
-    """
-    url = "https://catalog.api.2gis.com/3.0/items"
-    params = {"q": query, "region_id": region_id, "key": API_KEY, "page_size": 50}
+
+def get_region_id(city: str):
+    """Определяем регион через Regions API (только Казахстан)"""
+    url = "https://catalog.api.2gis.com/2.0/region/search"
+    params = {"q": city, "key": API_KEY}
     resp = requests.get(url, params=params).json()
 
+    items = resp.get("result", {}).get("items", [])
+    for i in items:
+        # Ищем только в Казахстане
+        if "Казахстан" in i.get("full_name", "") or "Kazakhstan" in i.get("full_name", ""):
+            return i.get("id")
+    # Если не нашли — fallback
+    return items[0]["id"] if items else None
+
+
+@router.get("/")
+def get_places(query: str = "Магазин", city: str = "Астана"):
+    """Поиск компаний/мест в 2GIS по названию и городу (с автоматическим region_id)"""
+
+    region_id = get_region_id(city)
+    if not region_id:
+        return {"error": f"❌ Не найден регион для города '{city}'"}
+
+    print(f"🌍 Найден регион '{city}' → ID: {region_id}")
+
+    url = "https://catalog.api.2gis.com/3.0/items"
+    params = {
+        "q": query,
+        "region_id": region_id,
+        "key": API_KEY,
+        "page_size": 50,
+        "fields": "items.point,items.address_name,items.contact_groups,items.rubrics,items.schedule",
+    }
+
+    resp = requests.get(url, params=params).json()
     if resp.get("meta", {}).get("code") != 200:
-        return {"error": "Ошибка при обращении к 2GIS API", "details": resp.get("meta")}
+        return {"error": "Ошибка при обращении к Places API", "details": resp.get("meta")}
 
     items = resp.get("result", {}).get("items", [])
     if not items:
         return {"status": "no_results", "query": query, "city": city}
 
+    # --- parse results ---
     results = []
     for item in items:
+        if item.get("type") not in ["branch", "firm"]:
+            continue
         coords, lat, lon = extract_coords(item.get("point"))
         results.append({
             "name": item.get("name", ""),
@@ -88,46 +114,47 @@ def get_places(query: str = "глэмпинг", city: str = "Алматы", regi
             "contacts": extract_contacts(item.get("contact_groups")),
             "coords": coords,
             "category": item.get("rubrics")[0]["name"] if item.get("rubrics") else "",
-            "lat": lat,
-            "lon": lon,
+            "lat": lat or "",
+            "lon": lon or "",
             "schedule": extract_schedule(item),
             "query": query,
             "city": city
         })
 
-    # --- 📦 Чтение старых данных ---
-    if os.path.exists(FILE_PATH) and os.path.getsize(FILE_PATH) > 0:
+    # --- merge and save ---
+    new_df = pd.DataFrame(results)
+    if os.path.exists(FILE_PATH):
         try:
             old_df = pd.read_csv(FILE_PATH)
-        except Exception:
-            old_df = pd.DataFrame(columns=results[0].keys())
+        except:
+            old_df = pd.DataFrame()
+        combined = pd.concat([old_df, new_df], ignore_index=True).drop_duplicates(subset=["name", "address"])
     else:
-        old_df = pd.DataFrame(columns=results[0].keys())
+        combined = new_df
 
-    # --- 🔄 Объединение и очистка ---
-    new_df = pd.DataFrame(results)
-    combined_df = pd.concat([old_df, new_df], ignore_index=True)
-    combined_df = combined_df.drop_duplicates(subset=["name", "address"], keep="last")
-    combined_df = combined_df.fillna("")
+    combined.replace([float("inf"), -float("inf"), None], "", inplace=True)
+    combined.to_csv(FILE_PATH, index=False, encoding="utf-8")
 
-    # --- 💾 Сохранение данных ---
-    combined_df.to_csv(FILE_PATH, index=False, encoding="utf-8")
-
-    # --- 💾 Сохраняем последние параметры для анализа ---
+    # --- save meta ---
     with open(os.path.join(META_DIR, "last_query.txt"), "w", encoding="utf-8") as f:
-        f.write(query.strip())
+        f.write(query)
     with open(os.path.join(META_DIR, "last_city.txt"), "w", encoding="utf-8") as f:
-        f.write(city.strip())
+        f.write(city)
 
-    print(f"✅ Добавлено новых объектов: {len(new_df)} (запрос: {query}, город: {city})")
-    print(f"📁 Всего сохранено: {len(combined_df)} записей")
+    # --- filter sample for current request ---
+    filtered_sample = combined[
+        (combined["query"] == query) & (combined["city"] == city)
+    ].tail(3)
+
+    print(f"✅ {len(new_df)} новых объектов ({city})")
 
     return {
         "status": "success",
         "query": query,
         "city": city,
+        "region_id": region_id,
         "count_new": len(new_df),
-        "total_saved": len(combined_df),
+        "total_saved": len(combined),
         "file": FILE_PATH,
-        "sample": combined_df.tail(3).to_dict(orient="records")
+        "sample": filtered_sample.to_dict(orient="records")
     }

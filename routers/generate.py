@@ -1,7 +1,8 @@
 
 # routers/generate.py
+# routers/generate.py
 from fastapi import APIRouter
-import os, asyncio, time
+import os, asyncio, time, json, re
 from dotenv import load_dotenv
 import pandas as pd
 import google.generativeai as genai
@@ -9,107 +10,166 @@ from datetime import datetime
 
 load_dotenv()
 router = APIRouter(prefix="/api/generate", tags=["AI Descriptions"])
-
-# 🔑 Настройка Gemini API
 genai.configure(api_key=os.getenv("GEMINI_API_KEY", "AIzaSyDT7vLvYPpM_qJ6U3fEskxmIMKizl3uwDk"))
 
-# 📁 Пути к файлам
 INPUT_FILE = "data/processed/analyzed.csv"
 OUTPUT_FILE = "data/processed/final.csv"
 
-# --- 🧠 Асинхронная функция генерации одного описания ---
-async def generate_single(model, name, category, address, index, total):
-    prompt = (
-        f"Напиши привлекательное описание туристического объекта '{name}' в Казахстане.\n"
-        f"Тип: {category}. Адрес: {address}.\n"
-        f"Сделай текст 150–200 слов, дружелюбный, живой, интересный и подходящий для сайта mytravel.kz.\n"
-        f"Не используй повторов, сделай текст уникальным и лёгким для чтения."
-    )
+# -------------------------------------------------------------------
+# 🧠 Генерация описания с требуемым JSON-форматом
+# -------------------------------------------------------------------
+async def generate_extended_description(model, name, category, address, niche, index, total):
+    prompt = f"""
+Ты — опытный копирайтер туристического сервиса. 
+Создай уникальные тексты для карточки места «{name}».
+
+Выведи строго в формате JSON:
+{{
+  "seo_title": "Короткий SEO-заголовок (до 80 символов, без кавычек)",
+  "short_description": "1–2 предложения (до 200 символов), живое описание без шаблонных фраз",
+  "description": "Развёрнутое описание (150–300 слов), интересное, эмоциональное, подходящее для сайта"
+}}
+
+Контекст:
+- Название: {name}
+- Категория: {category or "не указана"}
+- Адрес: {address or "не указан"}
+- Ниша: {niche or "общая туризм/отдых"}
+
+Требования:
+- Избегай одинаковых выражений между объектами (например: "вдали от городской суеты", "откройте для себя", "уютный уголок").
+- Каждый текст должен звучать по-разному: меняй стиль, ритм и лексику.
+- Передай атмосферу через детали (что человек чувствует, видит, слышит в этом месте).
+- Не используй шаблонные обороты и рекламные клише.
+- Стиль: естественный, человечный, с лёгкими эмоциями, но без пафоса.
+- Можно слегка менять тональность: романтичный, приключенческий, семейный, деловой — если подходит категории.
+- Не упоминай процесс генерации или сайт.
+
+"""
+
 
     for attempt in range(3):
         try:
-            print(f"🔹 [{index}/{total}] Генерация: {name} — попытка {attempt+1}")
-            # Асинхронный вызов блокирующей функции
+            print(f"🔹 [{index}/{total}] Генерация: {name} (попытка {attempt + 1})")
+
             response = await asyncio.to_thread(
                 model.generate_content,
                 prompt,
-                generation_config={"max_output_tokens": 400}
+                generation_config={"max_output_tokens": 800}
             )
-            if response and hasattr(response, "text"):
-                return response.text.strip()
-            return "Описание не удалось сгенерировать."
+            text = getattr(response, "text", "").strip()
+
+            # --- Пытаемся извлечь JSON из текста ---
+            match = re.search(r"\{.*\}", text, re.DOTALL)
+            if match:
+                try:
+                    data = json.loads(match.group(0))
+                    return {
+                        "title": data.get("seo_title", "").strip(),
+                        "short": data.get("short_description", "").strip(),
+                        "description": data.get("description", "").strip()
+                    }
+                except Exception:
+                    pass
+
+            # --- fallback: вытаскиваем вручную ---
+            lines = [l.strip() for l in text.split("\n") if l.strip()]
+            title = lines[0][:80] if lines else ""
+            short = lines[1][:200] if len(lines) > 1 else ""
+            desc = " ".join(lines[2:]) if len(lines) > 2 else text
+            return {"title": title, "short": short, "description": desc}
         except Exception as e:
-            err = str(e)
-            print(f"⚠️ Ошибка у {name}: {err}")
-            if "429" in err or "rate" in err.lower():
+            print(f"⚠️ Ошибка у {name}: {e}")
+            if "429" in str(e).lower():
                 await asyncio.sleep(2 * (attempt + 1))
                 continue
-            return f"Ошибка при генерации: {e}"
-
-    return "Ошибка: превышено количество попыток."
+    return {"title": "", "short": "", "description": "Ошибка при генерации."}
 
 
-# --- 🚀 Основной эндпоинт ---
+# -------------------------------------------------------------------
+# 🚀 Основной эндпоинт: генерация описаний
+# -------------------------------------------------------------------
 @router.get("/")
 async def generate_descriptions(limit: int = 5):
-    """
-    Асинхронно генерирует описания для туристических объектов.
-    Поддерживает параллельное выполнение для ускорения.
-    """
     if not os.path.exists(INPUT_FILE):
         return {"error": f"Файл {INPUT_FILE} не найден. Сначала запусти /api/analyze."}
 
-    print("\n🚀 [START] Асинхронная генерация через Gemini...")
+    print("\n🚀 [START] Генерация описаний через Gemini...")
     start_time = time.time()
 
-    # --- Загружаем данные ---
     df = pd.read_csv(INPUT_FILE).head(limit)
     if df.empty:
-        return {"warning": "Файл пуст, нет данных для генерации."}
+        return {"warning": "Нет данных для генерации."}
 
     model = genai.GenerativeModel("gemini-2.5-flash-lite")
 
-    # --- Асинхронные задачи ---
     tasks = [
-        generate_single(
+        generate_extended_description(
             model,
             row.get("name", "Туристический объект"),
-            row.get("category_type", "Объект размещения"),
+            row.get("category_type", "Размещение"),
             row.get("address", "Казахстан"),
+            row.get("niche", "Экотуризм"),
             i + 1, len(df)
         )
         for i, row in df.iterrows()
     ]
 
-    # --- Запускаем все запросы одновременно ---
     results = await asyncio.gather(*tasks)
 
-    # --- Обработка результатов ---
-    df["description"] = results
+    df["seo_title"] = [r["title"] for r in results]
+    df["short_description"] = [r["short"] for r in results]
+    df["description"] = [r["description"] for r in results]
 
-    success_count = sum(1 for r in results if "Ошибка" not in r)
-    fail_count = len(results) - success_count
-
-    # --- Сохраняем ---
     os.makedirs("data/processed", exist_ok=True)
     df.to_csv(OUTPUT_FILE, index=False, encoding="utf-8")
 
     elapsed = round(time.time() - start_time, 2)
-    timestamp = datetime.now().strftime("%H:%M:%S")
+    print(f"✅ Завершено за {elapsed} секунд. Файл сохранён: {OUTPUT_FILE}")
 
-    print("\n🏁 [FINISH] Генерация завершена!")
-    print(f"✅ Успешно: {success_count} | ❌ Ошибок: {fail_count}")
-    print(f"💾 Файл сохранён: {OUTPUT_FILE}")
-    print(f"🕓 Время выполнения: {elapsed} секунд\n")
-
-    # --- Возврат JSON ---
     return {
         "status": "done",
         "count": len(df),
-        "success": success_count,
-        "failed": fail_count,
         "output": OUTPUT_FILE,
         "time_sec": elapsed,
-        "finished_at": timestamp,
-        "sample": df[["name", "description"]].head(2).to_dict(orient="records"),
+        "sample": df[["name", "seo_title", "short_description"]].head(2).to_dict(orient="records")
     }
+
+
+# -------------------------------------------------------------------
+# 💬 Генерация шаблонов сообщений (Outreach)
+# -------------------------------------------------------------------
+@router.get("/outreach")
+async def generate_outreach_template(name: str, niche: str, location: str, channel: str = "email"):
+    model = genai.GenerativeModel("gemini-2.5-flash-lite")
+    prompt = f"""
+Ты — маркетолог mytravel.kz. Составь персонализированное сообщение для первого контакта.
+
+Формат:
+{{
+  "greeting": "Приветствие",
+  "body": "Основной текст с пользой и CTA",
+  "signature": "Команда mytravel.kz"
+}}
+
+Канал: {channel}
+Название: {name}
+Локация: {location}
+Ниша: {niche}
+
+Пример CTA: "Хотим добавить вас в каталог. Можно поговорить?"
+Пиши естественно и дружелюбно.
+"""
+
+    try:
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        text = getattr(response, "text", "")
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            data = json.loads(match.group(0))
+            return data
+    except Exception as e:
+        return {"error": str(e)}
+
+    return {"greeting": "Привет!", "body": "Мы заметили ваш объект и хотим сотрудничать.", "signature": "Команда mytravel.kz"}
+
