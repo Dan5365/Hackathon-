@@ -161,11 +161,11 @@ mytravel.kz — топовая платформа путешествий в Ка
             # Отправляем сообщение
             pywhatkit.sendwhatmsg(phone, message, hour, minute, 15, True, 2)
 
-            print(f"✅ Сообщение отправлено на {phone}")
+            print(f"Сообщение отправлено на {phone}")
             return True
 
         except Exception as e:
-            print(f"❌ Ошибка отправки на {phone_number}: {e}")
+            print(f"Ошибка отправки на {phone_number}: {e}")
             return False
 
     def format_phone_number(self, phone):
