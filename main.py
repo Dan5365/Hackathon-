@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from routers import places, analyze, generate
+from routers import places, analyze, generate, stats
 from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="MyTravel API")
 
@@ -19,9 +19,11 @@ app.include_router(places.router)
 app.include_router(analyze.router)
 app.include_router(generate.router)
 
+app.include_router(stats.router)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # или ["http://localhost:3000"] если React локально
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

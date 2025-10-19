@@ -31,15 +31,41 @@ def safe_float(v):
         return None
 
 
-def extract_contacts(groups):
-    if not groups:
-        return ""
-    phones = []
-    for g in groups:
-        for c in g.get("contacts", []):
-            if c.get("type") == "phone":
-                phones.append(c.get("value"))
-    return ", ".join(phones)
+def extract_contacts(contact_groups):
+    """
+    Извлекает телефоны, сайты и соцсети из блока contacts
+    """
+    if not contact_groups:
+        return "", ""
+
+    phones, socials = [], []
+    for group in contact_groups:
+        for contact in group.get("contacts", []):
+            ctype = contact.get("type", "")
+            value = contact.get("value", "")
+
+            if ctype == "phone" and value:
+                phones.append(value)
+
+            elif ctype == "website" and value:
+                socials.append(value)
+
+            elif ctype == "link" and value:
+                lower = value.lower()
+                if any(net in lower for net in ["instagram", "facebook", "vk", "t.me", "telegram", "whatsapp"]):
+                    socials.append(value)
+
+    return ", ".join(phones), ", ".join(socials)
+
+def fetch_contacts_by_id(item_id):
+    """Дополнительный запрос, если contact_groups пустой"""
+    url = "https://catalog.api.2gis.com/3.0/items/byid"
+    params = {"id": item_id, "key": API_KEY, "fields": "items.contact_groups"}
+    resp = requests.get(url, params=params).json()
+    items = resp.get("result", {}).get("items", [])
+    if not items:
+        return "", ""
+    return extract_contacts(items[0].get("contact_groups"))
 
 
 def extract_coords(point):
@@ -91,10 +117,12 @@ def get_places(query: str = "Магазин", city: str = "Астана"):
         "region_id": region_id,
         "key": API_KEY,
         "page_size": 50,
-        "fields": "items.point,items.address_name,items.contact_groups,items.rubrics,items.schedule",
+        "locale": "ru_KZ",
+        "fields": "items.contact_groups,items.address_name,items.rubrics,items.point,items.schedule"
     }
 
     resp = requests.get(url, params=params).json()
+
     if resp.get("meta", {}).get("code") != 200:
         return {"error": "Ошибка при обращении к Places API", "details": resp.get("meta")}
 
@@ -102,20 +130,21 @@ def get_places(query: str = "Магазин", city: str = "Астана"):
     if not items:
         return {"status": "no_results", "query": query, "city": city}
 
-    # --- parse results ---
     results = []
     for item in items:
         if item.get("type") not in ["branch", "firm"]:
             continue
         coords, lat, lon = extract_coords(item.get("point"))
+        phones, socials = extract_contacts(item.get("contact_groups"))
         results.append({
             "name": item.get("name", ""),
             "address": item.get("address_name", ""),
-            "contacts": extract_contacts(item.get("contact_groups")),
+            "contacts": phones,
+            "social": socials,
             "coords": coords,
             "category": item.get("rubrics")[0]["name"] if item.get("rubrics") else "",
-            "lat": lat or "",
-            "lon": lon or "",
+            "lat": lat,
+            "lon": lon,
             "schedule": extract_schedule(item),
             "query": query,
             "city": city

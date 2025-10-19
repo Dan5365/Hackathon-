@@ -1,6 +1,6 @@
 # логика ML анализа
-
-# логика ML анализа
+# Основная цель — обработать и проанализировать сырые данные о местах размещения,
+# рассчитать рейтинги, определить категории и коммерческий потенциал объектов.
 
 from fastapi import APIRouter
 import pandas as pd
@@ -35,51 +35,78 @@ def calc_rating(row):
 # 🔹 Функция для расчёта метрик
 # -------------------------------
 def calc_metrics(row):
+    """Улучшенные метрики с балансом — чтобы не все были холодными"""
     metrics = {}
 
-    # 1. Активность в сети
-    social = str(row.get("social") or "") + " " + str(row.get("website") or "")
-    metrics["activity_score"] = 2 if any(s in social for s in ["instagram", "facebook", "vk", "site"]) else 1
+    name = str(row.get("name") or "").lower()
+    category = str(row.get("category_type") or "").lower()
 
-    # 2. Полнота данных
+    # === 1. Активность в сети ===
+    social = str(row.get("social") or "") + " " + str(row.get("website") or "")
+    metrics["activity_score"] = 1 if any(s in social for s in ["instagram", "facebook", "vk", "site"]) else 0
+
+    # === 2. Полнота данных ===
     completeness_fields = ["contacts", "address", "description", "photos"]
     filled = sum(1 for f in completeness_fields if str(row.get(f) or "").strip())
-    metrics["completeness_score"] = round((filled / len(completeness_fields)) * 3, 1)
-    if metrics["completeness_score"] == 0:
-        metrics["completeness_score"] = 1
+    metrics["completeness_score"] = round((filled / len(completeness_fields)) * 2, 2)  # 0–2
 
-    # 3. Популярность
-    rating = float(row.get("rating_value") or 3.5)
-    reviews = int(row.get("reviews_count") or 5)
-    metrics["popularity_score"] = min(3, (rating / 5) * 2 + (reviews >= 5))
+    # === 3. Популярность (рейтинг и отзывы) ===
+    rating_val = float(row.get("rating_value") or 0)
+    reviews = int(row.get("reviews_count") or 0)
+    if rating_val >= 4 and reviews >= 10:
+        metrics["popularity_score"] = 2
+    elif rating_val >= 3.5 and reviews >= 3:
+        metrics["popularity_score"] = 1
+    else:
+        metrics["popularity_score"] = 0.3
 
-    # 4. Вместимость / цена
+    # === 4. Вместимость / цена ===
     capacity = int(row.get("rooms") or 0)
     price = float(row.get("price_avg") or 0)
     if capacity >= 20 or price >= 20000:
         metrics["capacity_score"] = 2
     elif capacity >= 10 or price >= 10000:
-        metrics["capacity_score"] = 1.5
-    else:
         metrics["capacity_score"] = 1
+    else:
+        metrics["capacity_score"] = 0.3
 
-    # 5. Соответствие нише
-    niche = str(row.get("category_type") or "")
-    metrics["target_score"] = 2 if niche in ["Люкс", "Эко", "Семейный", "Горный"] else 1.5
+    # === 5. Ниша (влияет сильнее) ===
+    niche_bonus = {
+        "люкс": 2,
+        "эко": 1.8,
+        "семейный": 1.5,
+        "горный": 1.5,
+        "этно": 1.2,
+        "стандарт": 0.8,
+    }
+    metrics["target_score"] = niche_bonus.get(category, 1)
 
-    # 6. Коммерческий потенциал
+    # === 6. Коммерческий потенциал ===
     metrics["commercial_score"] = round(
-        (metrics["completeness_score"] + metrics["target_score"] + metrics["popularity_score"]) / 3, 1
+        (metrics["completeness_score"] * 0.25 +
+         metrics["activity_score"] * 0.25 +
+         metrics["popularity_score"] * 0.25 +
+         metrics["target_score"] * 0.25), 2
     )
 
-    # 7. Финальный рейтинг
-    total = sum(metrics.values())
-    metrics["final_rating"] = min(10, round(total, 1))
+    # === 7. Финальный рейтинг ===
+    weights = {
+        "activity_score": 0.15,
+        "completeness_score": 0.2,
+        "popularity_score": 0.2,
+        "capacity_score": 0.15,
+        "target_score": 0.15,
+        "commercial_score": 0.15,
+    }
 
-    # 8. Категория срочности
-    if total >= 8:
+    weighted_sum = sum(metrics[m] * w for m, w in weights.items())
+    total = round(weighted_sum * 6, 1)  # масштабирование до 10
+    metrics["final_rating"] = min(total, 10)
+
+    # === 8. Срочность ===
+    if total >= 7.5:
         metrics["urgency"] = "🔥 Горячий лид"
-    elif total >= 6:
+    elif total >= 5:
         metrics["urgency"] = "🟡 Тёплый лид"
     else:
         metrics["urgency"] = "❄️ Холодный лид"
@@ -87,10 +114,15 @@ def calc_metrics(row):
     return pd.Series(metrics)
 
 
+
 # -------------------------------
 # 🔹 Определение типа категории
 # -------------------------------
 def detect_category(cat):
+    """
+     Преобразует исходную категорию объекта в стандартный сегмент:
+     Эко / Этно / Люкс / Семейный / Горный / Стандарт
+     """
     cat = str(cat or "").lower()
     if any(k in cat for k in ["эко", "eco"]):
         return "Эко"
@@ -111,6 +143,13 @@ def detect_category(cat):
 # -------------------------------
 @router.get("/")
 def analyze_data():
+    """
+     Основная функция обработки:
+     1. Загружает исходный CSV-файл с объектами.
+     2. Применяет фильтры по последнему запросу и городу.
+     3. Вычисляет рейтинги, категории и метрики.
+     4. Сохраняет результирующий CSV в /data/processed.
+     """
     input_file = "data/raw/places.csv"
     output_file = "data/processed/analyzed.csv"
     query_file = "data/meta/last_query.txt"

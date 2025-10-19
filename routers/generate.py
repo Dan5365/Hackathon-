@@ -19,6 +19,16 @@ OUTPUT_FILE = "data/processed/final.csv"
 # 🧠 Генерация описания с требуемым JSON-форматом
 # -------------------------------------------------------------------
 async def generate_extended_description(model, name, category, address, niche, index, total):
+    """
+     Генерирует три текстовых поля для карточки места:
+       - seo_title
+       - short_description
+       - description
+
+     Работает с Google Gemini, обрабатывает ошибки и пытается извлечь JSON.
+     """
+
+
     prompt = f"""
 Ты — опытный копирайтер туристического сервиса. 
 Создай уникальные тексты для карточки места «{name}».
@@ -64,6 +74,7 @@ async def generate_extended_description(model, name, category, address, niche, i
             if match:
                 try:
                     data = json.loads(match.group(0))
+                    # Возвращаем строго нужные поля
                     return {
                         "title": data.get("seo_title", "").strip(),
                         "short": data.get("short_description", "").strip(),
@@ -172,4 +183,43 @@ async def generate_outreach_template(name: str, niche: str, location: str, chann
         return {"error": str(e)}
 
     return {"greeting": "Привет!", "body": "Мы заметили ваш объект и хотим сотрудничать.", "signature": "Команда mytravel.kz"}
+
+@router.get("/outreach_ab")
+async def generate_outreach_ab(name: str, niche: str, location: str):
+    """
+    Генерирует два разных шаблона (A и B) для A/B теста.
+    """
+    model = genai.GenerativeModel("gemini-2.5-flash-lite")
+
+    variants = []
+    for variant in ["A", "B"]:
+        prompt = f"""
+        Ты — маркетолог mytravel.kz.
+        Составь версию {variant} шаблона первого контакта.
+
+        Формат:
+        {{
+          "variant": "{variant}",
+          "greeting": "Приветствие",
+          "body": "Основной текст с пользой и CTA",
+          "signature": "Команда mytravel.kz"
+        }}
+
+        Название: {name}
+        Локация: {location}
+        Ниша: {niche}
+        """
+
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        text = getattr(response, "text", "")
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        data = json.loads(match.group(0)) if match else {"variant": variant, "body": text}
+        variants.append(data)
+
+    # сохраняем для анализа
+    os.makedirs("data", exist_ok=True)
+    with open("data/outreach_tests.json", "w", encoding="utf-8") as f:
+        json.dump(variants, f, ensure_ascii=False, indent=2)
+
+    return {"status": "done", "variants": variants}
 
