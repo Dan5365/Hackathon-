@@ -89,7 +89,7 @@ python scripts/scarper.py -s "Астана Зона отдыха" -t 50 --timeou
 
 3.3 Для инстаграм
 ```
-python scripts/inst_parser_hack3.py
+python scripts/inst_parser_hack4.py
 ```
 
 После запуска приложение будет доступно по адресу:
