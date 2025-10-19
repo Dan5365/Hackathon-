@@ -59,3 +59,47 @@
 - CSV/JSON/XLSX экспорт
 
 
+**Этап Запуска:**
+1. Клонируем репозиторий
+```
+git clone https://github.com/Dan5365/Hackathon-.git
+cd https://github.com/Dan5365/Hackathon-.git
+```
+2. Установка зависимостей
+
+Создате виртуальное окружение и установи зависимости:
+```
+pip install -r requirements.txt
+```
+или
+```
+pip install fastapi uvicorn pandas requests
+```
+
+3.Запуск проекта
+3.1 Для 2gis
+```
+uvicorn main:app --reload
+```
+
+3.2 Для google maps
+```
+python scripts/scarper.py -s "Астана Зона отдыха" -t 50 --timeout 120 --headless False
+```
+
+3.3 Для инстаграм
+```
+python scripts/inst_parser_hack3.py
+```
+
+После запуска приложение будет доступно по адресу:
+ http://127.0.0.1:8000
+
+ **Структура проекта**
+
+ main.py                 # основной файл приложения
+routers/                # маршруты API
+utils/                  # вспомогательные функции
+scripts/                # скрипты и парсеры
+data/                   # данные (raw, processed, meta)
+output/                 # результаты анализа
