@@ -21,7 +21,7 @@ OUTPUT_CSV_FILE = "output/instagram_data_summary.csv"
 OUTPUT_JSON_REPORT_FILE = "output/instagram_data_full_report.json"
 POSTS_TO_FETCH = 10
 CAPTION_TRUNCATE_LIMIT = 300
-# --- КОНЕЦ НАСТРОЕК ---
+
 
 
 def human_delay(min_seconds=5, max_seconds=12):
@@ -125,7 +125,7 @@ def main():
     
     print(f"📈 Найдено {len(users_to_process)} пользователей для обработки.")
 
-    # <<< ИСПРАВЛЕННАЯ СТРОКА: ДОБАВЛЕНЫ НЕДОСТАЮЩИЕ ПОЛЯ >>>
+   
     csv_fieldnames = [
         'object_id', 'username', 'status', 'la_priority', 'la_final_score',
         'display_name', 'followers_count', 'following_count', 'posts_count', 
