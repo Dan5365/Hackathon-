@@ -1,5 +1,3 @@
-
-# routers/generate.py
 # routers/generate.py
 from fastapi import APIRouter
 import os, asyncio, time, json, re
@@ -16,7 +14,7 @@ INPUT_FILE = "data/processed/analyzed.csv"
 OUTPUT_FILE = "data/processed/final.csv"
 
 # -------------------------------------------------------------------
-# 🧠 Генерация описания с требуемым JSON-форматом
+#  Генерация описания с требуемым JSON-форматом
 # -------------------------------------------------------------------
 async def generate_extended_description(model, name, category, address, niche, index, total):
     """
@@ -74,7 +72,7 @@ async def generate_extended_description(model, name, category, address, niche, i
             if match:
                 try:
                     data = json.loads(match.group(0))
-                    # Возвращаем строго нужные поля
+                   
                     return {
                         "title": data.get("seo_title", "").strip(),
                         "short": data.get("short_description", "").strip(),
@@ -98,7 +96,7 @@ async def generate_extended_description(model, name, category, address, niche, i
 
 
 # -------------------------------------------------------------------
-# 🚀 Основной эндпоинт: генерация описаний
+#  Основной эндпоинт: генерация описаний
 # -------------------------------------------------------------------
 @router.get("/")
 async def generate_descriptions(limit: int = 5):
@@ -148,8 +146,9 @@ async def generate_descriptions(limit: int = 5):
 
 
 # -------------------------------------------------------------------
-# 💬 Генерация шаблонов сообщений (Outreach)
+# Генерация шаблонов сообщений (Outreach)
 # -------------------------------------------------------------------
+
 @router.get("/outreach")
 async def generate_outreach_template(name: str, niche: str, location: str, channel: str = "email"):
     model = genai.GenerativeModel("gemini-2.5-flash-lite")
