@@ -41,7 +41,7 @@
 
 ---
 
-## ⚙️ Tech Stack
+## Tech Stack
 
 **Языки и библиотеки:**
 - Python 3.x
