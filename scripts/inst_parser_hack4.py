@@ -21,14 +21,14 @@ OUTPUT_CSV_FILE = "instagram_data_summary.csv"
 OUTPUT_JSON_REPORT_FILE = "instagram_data_full_report.json"
 POSTS_TO_FETCH = 10
 CAPTION_TRUNCATE_LIMIT = 300
-# --- КОНЕЦ НАСТРОЕК ---
+
 
 # --- НАСТРОЙКИ ПОИСКА ---
 SEARCH_KEYWORDS = ["глэмпинг", "глэмпинг астана"]
 SEARCH_CITY = "Астана" 
-SEARCH_LIMIT_PER_QUERY = 30 # Уменьшил лимит для стабильности
+SEARCH_LIMIT_PER_QUERY = 30 
 FOUND_USERS_CSV_FILE = "found_users.csv"
-# --- КОНЕЦ НАСТРОЕК ПОИСКА ---
+
 
 
 def human_delay(min_seconds=5, max_seconds=12):
@@ -112,7 +112,7 @@ def search_and_prepare_users(cl: Client, keywords: list, city: str, limit: int):
     if city:
         print(f"📍 Ищем пользователей по городу: {city}")
         try:
-            # ИСПРАВЛЕНИЕ #1: Убран именованный аргумент 'query'
+            
             locations = cl.location_search(city)
             if not locations:
                 print(f"⚠️ Не удалось найти локацию для города '{city}'.")
@@ -141,11 +141,11 @@ def search_and_prepare_users(cl: Client, keywords: list, city: str, limit: int):
                 print(f"  > Найдено {len(results)} аккаунтов.")
                 for user in results:
                     if user.username not in found_users_data:
-                        # ИСПРАВЛЕНИЕ #2: Работаем с объектом UserShort, не запрашиваем лишние поля
+                        
                         found_users_data[user.username] = {
                             "username": user.username, "full_name": user.full_name,
-                            "followers": "", # Этих данных нет в UserShort
-                            "bio": "",       # Этих данных нет в UserShort
+                            "followers": "", 
+                            "bio": "",      
                             "city": "", "link": f"https://www.instagram.com/{user.username}/"
                         }
                 human_delay(3, 7)
@@ -194,14 +194,14 @@ def search_and_prepare_users(cl: Client, keywords: list, city: str, limit: int):
 
     print("--- 🏁 ПОИСК ЗАВЕРШЕН ---\n")
 
-# ИСПРАВЛЕНИЕ #3: Самая надежная функция сбора постов через private_request
+
 def get_user_posts_robust(cl: Client, user_id: str, amount: int) -> list[Media]:
     posts = []
     try:
-        # Прямой запрос к API для получения сырых данных
+        
         response = cl.private_request(f'feed/user/{user_id}/', params={'count': amount})
         
-        # Проверяем, что 'items' существует и это список
+      
         raw_medias = response.get('items', [])
         if not isinstance(raw_medias, list):
             print(f"  - ⚠️ Неожиданный формат ответа от API. Ключ 'items' не является списком.")
@@ -209,14 +209,14 @@ def get_user_posts_robust(cl: Client, user_id: str, amount: int) -> list[Media]:
 
         for raw_media in raw_medias:
             try:
-                # Попытка валидации каждого поста индивидуально
+                
                 posts.append(extract_media_v1(raw_media))
             except ValidationError as e:
                 media_pk = raw_media.get('pk', 'N/A')
-                # Выводим только первое (самое важное) сообщение об ошибке
+               
                 error_msg = e.errors()[0]['msg'] if e.errors() else "Unknown validation error"
                 print(f"  - ⚠️ Пропущен пост (ID: {media_pk}) из-за ошибки валидации: {error_msg}")
-                continue # Переходим к следующему посту
+                continue 
     except Exception as e:
          print(f"  - ❌ Критическая ошибка при загрузке постов: {e}")
     return posts
@@ -224,7 +224,7 @@ def get_user_posts_robust(cl: Client, user_id: str, amount: int) -> list[Media]:
 
 def main():
     cl = Client()
-    # ... (остальной код main остается без изменений) ...
+  
     session_dir = os.path.dirname(SESSION_FILE)
     if session_dir: os.makedirs(session_dir, exist_ok=True)
 
