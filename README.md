@@ -124,5 +124,8 @@ output/                 # результаты анализа
 <img width="1004" height="573" alt="{0AFF23CF-3368-48B0-B838-C4C802F6497A}" src="https://github.com/user-attachments/assets/e78eb1f8-fc59-4dc9-a800-2b2f3897ac64" />
 
 
+© 2025 Daniyal. All rights reserved.
+Проект разрешён только для личного и учебного использования.
+Коммерческое использование без разрешения владельца репозитория запрещено.
 
 
